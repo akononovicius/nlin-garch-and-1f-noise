@@ -36,6 +36,10 @@ public class garch {
 					i++;
 					commonVariables.outputPoints=Integer.parseInt(str[i]);
 					commonVariables.multiOutputPoints=commonVariables.outputPoints*30;
+				} else if(str[i].equalsIgnoreCase("--gatherPoints") || str[i].equalsIgnoreCase("-gp")) {
+					i++;
+					commonVariables.gatherPoints=Integer.parseInt(str[i]);
+					if(commonVariables.gatherPoints<=0) commonVariables.gatherPoints=1;
 				} else if(str[i].equalsIgnoreCase("-dt")) {
 					i++;
 					commonVariables.dt=Double.parseDouble(str[i]);
@@ -55,8 +59,6 @@ public class garch {
 					commonVariables.useAbs=true;
 				} else if(str[i].equalsIgnoreCase("--noLimits")) {
 					commonVariables.useLimits=false;
-				} else if(str[i].equalsIgnoreCase("--randomSign")) {
-					commonVariables.randomSign=true;
 				} else if(str[i].equalsIgnoreCase("--nonlinear") || str[i].equalsIgnoreCase("-nlin")) {
 					commonVariables.linear=false;
 				} else if(str[i].equalsIgnoreCase("--nonLinearFeedback") || str[i].equalsIgnoreCase("-nlinfb")) {
@@ -134,7 +136,7 @@ class launcher {
 		if(commonVariables.seed<0) commonVariables.seed=System.currentTimeMillis();
 		for(int i=0;i<commonVariables.core;i++) {
 			perc[i]=0;
-			equations[i]=new gija(commonVariables.seed,commonVariables.a,commonVariables.b,commonVariables.c,commonVariables.eta,commonVariables.dt,commonVariables.pdfMin,commonVariables.pdfMax,commonVariables.min,commonVariables.max,commonVariables.useLimits,commonVariables.x0,commonVariables.randomSign,commonVariables.useAbs,commonVariables.nonLinearFeedback,commonVariables.absoluteNoise,commonVariables.realizationPoints,realZingsnis,commonVariables.multiOutputPoints,commonVariables.outputTime,commonVariables.var,i,this);
+			equations[i]=new gija(commonVariables.seed,commonVariables.a,commonVariables.b,commonVariables.c,commonVariables.eta,commonVariables.dt,commonVariables.pdfMin,commonVariables.pdfMax,commonVariables.min,commonVariables.max,commonVariables.useLimits,commonVariables.x0,commonVariables.useAbs,commonVariables.nonLinearFeedback,commonVariables.absoluteNoise,commonVariables.gatherPoints,commonVariables.realizationPoints,realZingsnis,commonVariables.multiOutputPoints,commonVariables.outputTime,commonVariables.var,i,this);
 			System.out.println("Thread nr. "+i+" was launched. Sent "+realZingsnis+" jobs.");
 		}
 	}
@@ -158,7 +160,7 @@ class launcher {
 			for(int i=0;i<spec.length;i++) spec[i]/=((double)commonVariables.core);
 			double xstep=(commonVariables.pdfMax-commonVariables.pdfMin)/((double)commonVariables.multiOutputPoints);
 			outputarr(commonFunctions.logPdfModification(pdf,commonVariables.pdfMin+first*xstep,commonVariables.pdfMin+last*xstep,commonVariables.pdfMin,xstep,commonVariables.outputPoints),commonVariables.outputTemplate+commonVariables.preffix+"dist",6,false);
-			outputarr(commonFunctions.specModification(spec,60*commonVariables.dt/commonVariables.dt60,commonVariables.outputPoints,false),commonVariables.outputTemplate+commonVariables.preffix+"spec",6,false);
+			outputarr(commonFunctions.specModification(spec,commonVariables.gatherPoints*60*commonVariables.dt/commonVariables.dt60,commonVariables.outputPoints,false),commonVariables.outputTemplate+commonVariables.preffix+"spec",6,false);
 			System.out.println("Done. Exiting.");
 			System.exit(0);
 		}
@@ -237,18 +239,20 @@ class gija implements Runnable {
 	private int proc=1;
 	private int nr=1;
 	private boolean outputTime=true;
+	private int gatherPoints=1;
 	public gija() {}
-	public gija(long seed, double va, double vb, double vc, double veta, double vdt, double vpmin, double vpmax, double vfmin, double vfmax, boolean vf, double vx, boolean vrsig, boolean vabs, boolean lnfb, boolean vabsn, int vrp, int vr, int vo, boolean outT, int var, int vnr, launcher vpar) {
+	public gija(long seed, double va, double vb, double vc, double veta, double vdt, double vpmin, double vpmax, double vfmin, double vfmax, boolean vf, double vx, boolean vabs, boolean lnfb, boolean vabsn, int vgp, int vrp, int vr, int vo, boolean outT, int var, int vnr, launcher vpar) {
 		if(commonVariables.linear) {
 			equation=new linearGarch(va,vb,vc,vfmin,vfmax,vf,vnr,vabs,seed);
 		} else {
-			equation=new nonLinearGarch(va,vb,vc,vfmin,vfmax,vf,vnr,veta,vrsig,vabs,lnfb,vabsn,seed);
+			equation=new nonLinearGarch(va,vb,vc,vfmin,vfmax,vf,vnr,veta,vabs,lnfb,vabsn,seed);
 		}
 		equation.var=var;
 		pdfMin=vpmin;
 		pdfMax=vpmax;
 		dt=vdt;
 		x0=Math.min(Math.max(vx,vfmin),vfmax);
+		gatherPoints=vgp;
 		realizationPoints=vrp;
 		realizations=vr;
 		reportNext=(int)Math.floor(proc*realizations*(((double)realizationPoints)/100.0));
@@ -272,11 +276,25 @@ class gija implements Runnable {
 			for(int i=0;i<pdf.length;i++) pdft[i]=0;
 			long alreadyMade=j*realizationPoints;
 			for(int i=0;i<realizationPoints;i++) {
-				x[i]=equation.step(dt);
-				double eqrez=Math.log(x[i])/matlog10;
-				if((eqrez>=pdfMin)&&(eqrez<=pdfMax)) {
-					int tmp=(int)Math.floor((eqrez-pdfMin)/pdfStep);
-					if((tmp>=0)&&(tmp<pdft.length)) pdft[tmp]++;
+				if(gatherPoints>1) {
+					double grez=0;
+					for(int g=0;g<gatherPoints;g++) {
+						double eqrez=equation.step(dt);
+						grez+=eqrez;
+						eqrez=Math.log(eqrez)/matlog10;
+						if((eqrez>=pdfMin)&&(eqrez<=pdfMax)) {
+							int tmp=(int)Math.floor((eqrez-pdfMin)/pdfStep);
+							if((tmp>=0)&&(tmp<pdft.length)) pdft[tmp]++;
+						}						
+					}
+					x[i]=grez/((double)gatherPoints);
+				} else {
+					x[i]=equation.step(dt);
+					double eqrez=Math.log(x[i])/matlog10;
+					if((eqrez>=pdfMin)&&(eqrez<=pdfMax)) {
+						int tmp=(int)Math.floor((eqrez-pdfMin)/pdfStep);
+						if((tmp>=0)&&(tmp<pdft.length)) pdft[tmp]++;
+					}
 				}
 				if((i+alreadyMade)>=reportNext) {
 					parrent.report(nr,proc);
@@ -454,10 +472,9 @@ class linearGarch extends generalCarcass {
 
 class nonLinearGarch extends generalCarcass {
 	private int eta=1;
-	private boolean randomSign=false;
 	private boolean nonLinearFeedback=false;
 	private boolean absoluteNoise=false;
-	public nonLinearGarch(double va, double vb, double vc, double vfmin, double vfmax, boolean vf, int vnr, double veta, boolean rsig, boolean vabs, boolean nlfb, boolean vabsn, long seed) {
+	public nonLinearGarch(double va, double vb, double vc, double vfmin, double vfmax, boolean vf, int vnr, double veta, boolean vabs, boolean nlfb, boolean vabsn, long seed) {
 		a=va;
 		b=vb;
 		c=vc;
@@ -466,7 +483,6 @@ class nonLinearGarch extends generalCarcass {
 		useLimits=vf;
 		numeris=vnr;
 		if(vnr==0) commonVariables.preffix="nlin.";
-		randomSign=rsig;
 		useAbs=vabs;
 		nonLinearFeedback=nlfb;
 		absoluteNoise=vabsn;
@@ -482,9 +498,6 @@ class nonLinearGarch extends generalCarcass {
 			double rez=1;
 			for(int i=0;i<eta;i++) rez*=zeta;
 			zeta=rez;
-			if(randomSign) {
-				if(gen.nextDouble()<0.5) zeta=-zeta;
-			}
 		}
 		if(nonLinearFeedback) {
 			double feedback=Math.sqrt(lastSigma2);//eta=0.5
@@ -515,26 +528,25 @@ class commonVariables {
 	public static int core=1;//number of processor cores (paralel execution if multicore processor)
 	public static int realizations=1;//total number of realizations
 	public static int realizationPoints=32768;//number of points in realization
-	public static int outputPoints=640;//tasku skaicius skirstinio ir spektro isvedime
-	public static int multiOutputPoints=10000;//pereinamas tasku skaicius (pvz. pdf)
-	public static String preffix="garch.lin.";//isvedimo sablono prefixas;nustatomas klasese
-	public static String outputTemplate="rez.";//isvedimo sablonas nurodomas vartotojo
-	public static double pdfMin=0.001;//skirstinio ribojimas is apacios
-	public static double pdfMax=0.999;//skirstinio ribojimas is virsaus
-	public static boolean outputTime=false;//isvesti laiko eilutes?
-	public static double dt=1;//laiko intervalas tarp dvieju tasku realizacijoje
-	public static double dt60=60;//amount laiko atitinka viena minute?
-	public static double min=0.001;//sprendinio ribojimas is apacios
-	public static double max=0.999;//sprendinio ribojimas is virsaus
-	public static boolean useLimits=true;//ar riboti sprendini?
-	public static boolean useAbs=false;//ar riboti sprendini?
-	public static double x0=0;//pradinis realizacijos taskas
-	public static double k=1;//sprendinio tikslumas (maziau geriau)
-	public static double a=1;//modelio parametrai
-	public static double b=1;//modelio parametrai
-	public static double c=1;//modelio parametrai
-	public static double eta=1;//modelio parametrai
-	public static boolean randomSign=false;
+	public static int gatherPoints=10;//number of points to fold into
+	public static int outputPoints=640;//number of points to output in PDF or PSD
+	public static int multiOutputPoints=10000;//internal number of points for estimating PDF
+	public static String preffix="lin.";//output template (file prefix)
+	public static String outputTemplate="rez.";//output template (file prefix)
+	public static double pdfMin=0.001;//lower bound for PDF
+	public static double pdfMax=0.999;//upper bound for PDF
+	public static boolean outputTime=false;//output time series?
+	public static double dt=1;//time interval between two points in realization
+	public static double dt60=60;//how much time coincides with minute?
+	public static double min=0.001;//limit from below
+	public static double max=0.999;//limit from above
+	public static boolean useLimits=true;//impose limits on the solution?
+	public static boolean useAbs=false;//take absolute value of the solution?
+	public static double x0=0;//initial condition
+	public static double a=1;//model parameters
+	public static double b=1;//model parameters
+	public static double c=1;//model parameters
+	public static double eta=1;//model parameters (mu = 2 eta)
 	public static boolean linear=true;
 	public static boolean absoluteNoise=false;
 	public static boolean nonLinearFeedback=false;
